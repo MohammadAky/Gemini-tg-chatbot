@@ -22,7 +22,7 @@ function setSecretsBale() {
 }
 
 // ==================== HANDLE WEBHOOK REQUESTS ====================
-function doPostBale(e) {
+function doPost(e) {
   try {
     const update = JSON.parse(e.postData.contents);
 
@@ -68,7 +68,7 @@ function doPostBale(e) {
       sendLongBaleMessage(chatId, reply, messageId);
     }
   } catch (err) {
-    Logger.log("Error in doPostBale: " + err.toString());
+    Logger.log("Error in doPost: " + err.toString());
   }
 
   return HtmlService.createHtmlOutput("OK");
