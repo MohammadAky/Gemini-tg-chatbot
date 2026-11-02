@@ -5,13 +5,14 @@ const TELEGRAM_TOKEN = PROPS.getProperty("TELEGRAM_TOKEN");
 const GEMINI_API_KEY = PROPS.getProperty("GEMINI_API_KEY");
 const SHEET_ID = PROPS.getProperty("SHEET_ID");
 
-const DEFAULT_MODEL = "gemini-1.5-flash"; // بهترین مدل پیش‌فرض برای سرعت و درک عکس
+// بهترین مدل پیش‌فرض برای سرعت بالا و درک چندوجهی (عکس/فایل)
+const DEFAULT_MODEL = "gemini-1.5-flash"; 
 const MAX_HISTORY = 20;       // حداکثر پیام‌های ارسالی به مدل (۱۰ رفت‌وبرگشت)
-const READ_LAST_ROWS = 300;   // برای سرعت، فقط این تعداد ردیف آخر شیت خوانده می‌شود
+const READ_LAST_ROWS = 300;   // خواندن فقط ۳۰۰ ردیف آخر برای حفظ سرعت
 const KEEP_ROWS = 2000;       
 const SHEET_NAME = "history";
 
-// ==================== ذخیره کلیدها (فقط یک‌بار برای تنظیمات) ====================
+// ==================== ذخیره کلیدها (فقط یک‌بار برای تنظیمات اجرا شود) ====================
 function setSecrets() {
   PROPS.setProperties({
     TELEGRAM_TOKEN: "توکن_تلگرام_شما",
@@ -21,13 +22,14 @@ function setSecrets() {
   Logger.log("تنظیمات ذخیره شد. حالا می‌توانید مقادیر را از کد پاک کنید.");
 }
 
-// ==================== لیست دست‌چین شده مدل‌ها ====================
+// ==================== لیست مدل‌های کاربران (سریع و ثابت) ====================
+// این لیست را می‌توانید بر اساس خروجی تابع logAvailableModelsFromAPI (در پایین کد) تغییر دهید
 function getAvailableModels() {
   return [
-    "gemini-1.5-flash",       // پرسرعت و عالی برای کارهای روزمره و عکس
-    "gemini-1.5-pro",         // هوشمندترین برای استدلال و کدنویسی
-    "gemini-1.5-flash-8b",    // نسخه بسیار سبک و سریع
-    "gemini-2.0-flash-exp"    // نسخه جدید و آزمایشی با قدرت بالا
+    "gemini-1.5-flash",       
+    "gemini-1.5-pro",         
+    "gemini-2.0-flash-exp",
+    "gemini-1.5-flash-8b"
   ];
 }
 
@@ -60,7 +62,7 @@ function doPost(e) {
     let mimeType = null;
 
     if (update.message.photo) {
-      const photo = update.message.photo[update.message.photo.length - 1]; // انتخاب بالاترین کیفیت عکس
+      const photo = update.message.photo[update.message.photo.length - 1]; // بالاترین کیفیت
       fileId = photo.file_id;
       mimeType = "image/jpeg";
     } else if (update.message.voice) {
@@ -71,7 +73,7 @@ function doPost(e) {
       mimeType = update.message.document.mime_type || "application/pdf";
     }
 
-    // پردازش دستورات اصلی بات
+    // پردازش دستورات اصلی ربات
     if (text === "/start" || text === "/help") {
       const welcomeMsg =
         "سلام! من دستیار هوشمند شما هستم 🤖\n\n" +
@@ -108,7 +110,7 @@ function doPost(e) {
     if (fileId) {
       sendChatAction(chatId, "upload_document");
       fileBase64 = getTelegramFileBase64(fileId);
-      if (!text) text = "لطفاً این فایل را به دقت بررسی و تحلیل کن."; // متن پیش‌فرض اگر کاربر کپشن ننوشت
+      if (!text) text = "لطفاً این فایل را به دقت بررسی و تحلیل کن."; // متن پیش‌فرض
     } else {
       sendChatAction(chatId, "typing");
     }
@@ -156,7 +158,7 @@ function isDuplicateUpdate(updateId) {
   const cache = CacheService.getScriptCache();
   const key = "upd_" + updateId;
   if (cache.get(key)) return true;
-  cache.put(key, "1", 600); // 10 minutes cache
+  cache.put(key, "1", 600); // 10 دقیقه
   return false;
 }
 
@@ -198,7 +200,7 @@ function getHistory(chatId) {
 }
 
 function appendHistory(chatId, role, text) {
-  const safeText = String(text).substring(0, 49000); // محدودیت ۵۰ هزار کاراکتری شیت
+  const safeText = String(text).substring(0, 49000); 
   getSheet().appendRow([String(chatId), role, safeText, new Date()]);
 }
 
@@ -206,7 +208,7 @@ function clearHistory(chatId) {
   appendHistory(chatId, "reset", "");
 }
 
-// ==================== تنظیمات شخصی کاربر (مدل و نقش) ====================
+// ==================== تنظیمات شخصی کاربر ====================
 function getUserModel(chatId) {
   return PROPS.getProperty("model_" + chatId) || DEFAULT_MODEL;
 }
@@ -269,13 +271,18 @@ function askGemini(chatId, promptText, modelName, fileBase64 = null, mimeType = 
     generationConfig: { temperature: 0.7, maxOutputTokens: 2500 }
   };
 
-  // تزریق دستورات سیستمی (اگر کاربر Persona تنظیم کرده باشد)
+  // تزریق زمان زنده ایران و دستورات شخصیتی (Persona)
+  const now = Utilities.formatDate(new Date(), "Asia/Tehran", "yyyy/MM/dd HH:mm:ss");
+  let systemContext = "تو یک دستیار هوشمند هستی. تاریخ و ساعت دقیق فعلی سیستم به وقت ایران: " + now;
+  
   const persona = getUserPersona(chatId);
   if (persona) {
-    payload.systemInstruction = {
-      parts: [{ text: persona }]
-    };
+    systemContext += "\n\nنقش و شخصیت تو برای این مکالمه:\n" + persona;
   }
+
+  payload.systemInstruction = {
+    parts: [{ text: systemContext }]
+  };
 
   const options = {
     method: "post",
@@ -291,8 +298,8 @@ function askGemini(chatId, promptText, modelName, fileBase64 = null, mimeType = 
     if (json.candidates && json.candidates[0].content) {
       const reply = json.candidates[0].content.parts.map(p => p.text || "").join("");
 
-      // جلوگیری از ذخیره بیس۶۴ عکس در شیت گوگل
-      const historyPromptText = fileBase64 ? (promptText + "\n[یک فایل/عکس پیوست شد]") : promptText;
+      // جلوگیری از ذخیره بیس۶۴ در شیت
+      const historyPromptText = fileBase64 ? (promptText + "\n[فایل/عکس پیوست شد]") : promptText;
       try {
         appendHistory(chatId, "user", historyPromptText);
         appendHistory(chatId, "model", reply);
@@ -325,7 +332,7 @@ function convertToTelegramMarkdownV2(text) {
     return `__IC${inlineCodes.length - 1}__`;
   });
 
-  // 2. Escape کردن کاراکترهای حساس در Telegram MarkdownV2
+  // 2. Escape کردن کاراکترهای حساس
   const specialChars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'];
   specialChars.forEach(char => {
     const regex = new RegExp('\\' + char, 'g');
@@ -336,7 +343,7 @@ function convertToTelegramMarkdownV2(text) {
   text = text.replace(/\\\*\\\*(.*?)\\\*\\\*/g, '*$1*'); // Bold
   text = text.replace(/\\\*(.*?)\\\*/g, '_$1_');         // Italic
 
-  // 4. بازگرداندن ایمن کدها
+  // 4. بازگرداندن کدها
   text = text.replace(/__CB(\d+)__/g, (match, p1) => codeBlocks[p1]);
   text = text.replace(/__IC(\d+)__/g, (match, p1) => inlineCodes[p1]);
 
@@ -363,7 +370,6 @@ function sendTelegramMessage(chatId, text, replyMarkup = null, replyToId = null)
     payload: JSON.stringify(payload), muteHttpExceptions: true
   });
 
-  // Fallback: اگر پارس MarkdownV2 به هر دلیلی خطا داد، متن را ساده بفرست
   if (response.getResponseCode() !== 200) {
     delete payload.parse_mode;
     payload.text = text; 
@@ -404,7 +410,6 @@ function sendModelSelectionMenu(chatId) {
     const label = (isSelected ? "✅ " : "") + modelName;
     currentRow.push({ text: label, callback_data: "set_model:" + modelName });
     
-    // دکمه‌ها را دوتا دوتا در هر ردیف می‌چیند
     if (currentRow.length === 2) { 
         inlineKeyboard.push(currentRow); 
         currentRow = []; 
@@ -414,7 +419,7 @@ function sendModelSelectionMenu(chatId) {
   if (currentRow.length > 0) inlineKeyboard.push(currentRow);
 
   const keyboard = { inline_keyboard: inlineKeyboard };
-  sendTelegramMessage(chatId, "⚡️ لیست مدل‌های قدرتمند و بهینه شده:", keyboard);
+  sendTelegramMessage(chatId, "⚡️ لیست مدل‌های فعال برای شما:", keyboard);
 }
 
 function handleCallbackQuery(callbackQuery) {
@@ -425,7 +430,6 @@ function handleCallbackQuery(callbackQuery) {
     const selectedModel = data.substring("set_model:".length);
     setUserModel(chatId, selectedModel);
     
-    // بستن پیام لودینگ روی دکمه شیشه‌ای
     UrlFetchApp.fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/answerCallbackQuery`, {
       method: "post", contentType: "application/json",
       payload: JSON.stringify({ callback_query_id: callbackQuery.id, text: "مدل با موفقیت تنظیم شد!" }),
@@ -433,5 +437,33 @@ function handleCallbackQuery(callbackQuery) {
     });
     
     sendTelegramMessage(chatId, `✅ مدل فعال شما با موفقیت تغییر کرد به:\n\`${selectedModel}\``);
+  }
+}
+
+// ==================== ابزار مخصوص ادمین (در محیط گوگل اسکریپت اجرا کنید) ====================
+function logAvailableModelsFromAPI() {
+  Logger.log("در حال ارتباط با API برای دریافت مدل‌های در دسترس...");
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}&pageSize=100`;
+    const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    
+    if (response.getResponseCode() === 200) {
+      const json = JSON.parse(response.getContentText());
+      if (json.models) {
+        const activeModels = json.models
+          .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent"))
+          .map(m => m.name.replace("models/", ""));
+          
+        Logger.log("✅ لیست تمام مدل‌های فعال برای کلید شما:\n");
+        activeModels.forEach((model, idx) => {
+          Logger.log(`${idx + 1}. ${model}`);
+        });
+        Logger.log("\n💡 راهنمایی: نام مدل‌های بالا را می‌توانید در تابع 'getAvailableModels' کپی کنید.");
+      }
+    } else {
+      Logger.log("❌ خطای API: " + response.getContentText());
+    }
+  } catch (e) {
+    Logger.log("❌ ارور در دریافت اطلاعات: " + e.toString());
   }
 }
