@@ -1,43 +1,43 @@
-// ==================== INITIAL SETTINGS ====================
-// All keys are stored in Script Properties, not inside the code.
+// ==================== تنظیمات اولیه ====================
+// تمام کلیدها در Script Properties ذخیره می‌شوند، نه داخل کد.
 const PROPS_BALE = PropertiesService.getScriptProperties();
 const BALE_TOKEN = PROPS_BALE.getProperty("BALE_TOKEN");
 const GEMINI_API_KEY_BALE = PROPS_BALE.getProperty("GEMINI_API_KEY");
 const SHEET_ID_BALE = PROPS_BALE.getProperty("SHEET_ID");
 
-const DEFAULT_MODEL_BALE = "gemini-3.5-flash-lite"; // Use logModelsBale() to see available models for your key
-const MAX_HISTORY_BALE = 20;       // Max messages sent to the model (10 turns)
-const READ_LAST_ROWS_BALE = 300;   // Only read the last N rows from the sheet for better performance
-const KEEP_ROWS_BALE = 2000;       // cleanupOldRowsBale() will keep only this many last rows
+const DEFAULT_MODEL_BALE = "gemini-3.5-flash-lite"; // برای دیدن مدل‌های فعال کلید خود از logModelsBale() استفاده کنید
+const MAX_HISTORY_BALE = 20;       // حداکثر پیام‌های ارسالی به مدل (۱۰ رفت‌وبرگشت)
+const READ_LAST_ROWS_BALE = 300;   // خواندن فقط N ردیف آخر از شیت برای عملکرد بهتر (سرعت بالاتر)
+const KEEP_ROWS_BALE = 2000;       // تابع cleanupOldRowsBale() فقط این تعداد از ردیف‌های آخر را نگه می‌دارد
 const SHEET_NAME_BALE = "history_bale";
 
-// ==================== SAVE SECRETS (RUN ONCE ONLY, THEN REMOVE/COMMENT OUT) ====================
+// ==================== ذخیره کلیدها (فقط یک‌بار اجرا کنید، سپس مقادیر را حذف یا کامنت کنید) ====================
 function setSecretsBale() {
   PROPS_BALE.setProperties({
     BALE_TOKEN: "YOUR_BALE_BOT_TOKEN",
     GEMINI_API_KEY: "YOUR_GEMINI_API_KEY",
     SHEET_ID: "YOUR_GOOGLE_SHEET_ID"
   });
-  Logger.log("Saved. Now remove or comment out the values from the code.");
+  Logger.log("ذخیره شد. حالا می‌توانید مقادیر را از کد پاک یا کامنت کنید.");
 }
 
-// ==================== HANDLE WEBHOOK REQUESTS ====================
+// ==================== دریافت درخواست‌های وب‌هوک ====================
 function doPost(e) {
   try {
     const update = JSON.parse(e.postData.contents);
 
-    // Prevent processing duplicate updates
+    // جلوگیری از پردازش آپدیت‌های تکراری
     if (isDuplicateUpdateBale(update.update_id)) {
       return HtmlService.createHtmlOutput("OK");
     }
 
-    // Handle inline keyboard button clicks (model selection)
+    // پردازش کلیک روی دکمه‌های شیشه‌ای (انتخاب مدل)
     if (update.callback_query) {
       handleCallbackQueryBale(update.callback_query);
       return HtmlService.createHtmlOutput("OK");
     }
 
-    // Ignore updates without text messages
+    // نادیده گرفتن آپدیت‌های بدون متن
     if (!update.message || !update.message.text) {
       return HtmlService.createHtmlOutput("OK");
     }
@@ -48,9 +48,9 @@ function doPost(e) {
 
     if (text === "/start" || text === "/help") {
       const welcomeMsg =
-        "Hi! I'm an AI bot connected to Gemini. I remember our conversation.\n\n" +
-        "🔹 /models - View and select models\n" +
-        "🔹 /new - Clear memory and start a new conversation";
+        "سلام! من یک ربات هوش مصنوعی متصل به جمنای هستم. من مکالمه ما را به خاطر می‌سپارم.\n\n" +
+        "🔹 /models - مشاهده و انتخاب مدل‌ها\n" +
+        "🔹 /new - پاک کردن حافظه و شروع یک گفتگوی جدید";
       sendBaleMessage(chatId, welcomeMsg);
     }
     else if (text === "/models") {
@@ -58,7 +58,7 @@ function doPost(e) {
     }
     else if (text === "/new" || text === "/reset") {
       clearHistoryBale(chatId);
-      sendBaleMessage(chatId, "🧹 Conversation memory cleared. Starting a new conversation.");
+      sendBaleMessage(chatId, "🧹 حافظه گفتگو پاک شد. در حال شروع مکالمه جدید.");
     }
     else {
       const currentModel = getUserModelBale(chatId);
@@ -74,24 +74,24 @@ function doPost(e) {
   return HtmlService.createHtmlOutput("OK");
 }
 
-// ==================== PREVENT DUPLICATE UPDATES ====================
+// ==================== جلوگیری از آپدیت‌های تکراری ====================
 function isDuplicateUpdateBale(updateId) {
   if (updateId === undefined) return false;
   const cache = CacheService.getScriptCache();
   const key = "upd_bale_" + updateId;
   if (cache.get(key)) return true;
-  cache.put(key, "1", 600); // Cache for 10 minutes
+  cache.put(key, "1", 600); // کش برای ۱۰ دقیقه
   return false;
 }
 
-// ==================== CONVERSATION HISTORY IN GOOGLE SHEETS ====================
+// ==================== تاریخچه گفتگو در گوگل شیت ====================
 function getSheetBale() {
   const ss = SpreadsheetApp.openById(SHEET_ID_BALE);
   let sh = ss.getSheetByName(SHEET_NAME_BALE);
   if (!sh) {
     sh = ss.insertSheet(SHEET_NAME_BALE);
     sh.appendRow(["chatId", "role", "text", "time"]);
-    sh.getRange("A:C").setNumberFormat("@"); // Force plain text to avoid auto-conversion to formulas or numbers
+    sh.getRange("A:C").setNumberFormat("@"); // اجبار به فرمت متن ساده برای جلوگیری از تبدیل خودکار به فرمول یا عدد
   }
   return sh;
 }
@@ -108,13 +108,13 @@ function getHistoryBale(chatId) {
     let history = [];
     rows.forEach(r => {
       if (String(r[0]) !== String(chatId)) return;
-      if (r[1] === "reset") { history = []; return; } // Marker from /new command
+      if (r[1] === "reset") { history = []; return; } // نشانگر دستور /new
       if (r[1] !== "user" && r[1] !== "model") return;
       history.push({ role: r[1], parts: [{ text: String(r[2]) }] });
     });
 
     history = history.slice(-MAX_HISTORY_BALE);
-    // Ensure the first message is always from the user
+    // اطمینان از اینکه اولین پیام همیشه از طرف کاربر است
     while (history.length && history[0].role !== "user") history.shift();
     return history;
   } catch (e) {
@@ -124,20 +124,20 @@ function getHistoryBale(chatId) {
 }
 
 function appendHistoryBale(chatId, role, text) {
-  // Google Sheets has a maximum limit of 50,000 characters per cell
+  // گوگل شیت محدودیت ۵۰,۰۰۰ کاراکتر در هر سلول دارد
   const safeText = String(text).substring(0, 49000);
   getSheetBale().appendRow([String(chatId), role, safeText, new Date()]);
 }
 
 function clearHistoryBale(chatId) {
   try {
-    appendHistoryBale(chatId, "reset", ""); // Messages before this marker are ignored
+    appendHistoryBale(chatId, "reset", ""); // پیام‌های قبل از این نشانگر نادیده گرفته می‌شوند
   } catch (e) {
     Logger.log("clearHistoryBale error: " + e.toString());
   }
 }
 
-// ==================== FETCH AVAILABLE MODELS FROM GEMINI API ====================
+// ==================== دریافت مدل‌های در دسترس از API جمنای ====================
 function getAvailableModelsBale() {
   try {
     const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY_BALE}&pageSize=100`;
@@ -155,11 +155,11 @@ function getAvailableModelsBale() {
   return [DEFAULT_MODEL_BALE];
 }
 
-// ==================== COMMUNICATE WITH GEMINI API (WITH HISTORY) ====================
+// ==================== ارتباط با API جمنای (همراه با تاریخچه) ====================
 function askGeminiBale(chatId, promptText, modelName) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY_BALE}`;
 
-  // Previous history + new message
+  // تاریخچه قبلی + پیام جدید
   const contents = getHistoryBale(chatId);
   contents.push({ role: "user", parts: [{ text: promptText }] });
 
@@ -189,7 +189,7 @@ function askGeminiBale(chatId, promptText, modelName) {
         .map(p => p.text || "")
         .join("");
 
-      // Only save successful responses to history
+      // فقط پاسخ‌های موفق در تاریخچه ذخیره شوند
       try {
         appendHistoryBale(chatId, "user", promptText);
         appendHistoryBale(chatId, "model", reply);
@@ -199,16 +199,16 @@ function askGeminiBale(chatId, promptText, modelName) {
 
       return reply;
     } else if (json.error) {
-      return "Gemini API Error: " + json.error.message;
+      return "خطای API جمنای: " + json.error.message;
     } else {
-      return "No response received from the model.";
+      return "پاسخی از مدل دریافت نشد.";
     }
   } catch (error) {
-    return "Error connecting to server: " + error.toString();
+    return "خطا در ارتباط با سرور: " + error.toString();
   }
 }
 
-// ==================== MANAGE USER'S SELECTED MODEL (PERSISTENT) ====================
+// ==================== مدیریت مدل انتخاب‌شده کاربر (دائمی) ====================
 function getUserModelBale(chatId) {
   return PROPS_BALE.getProperty("model_bale_" + chatId) || DEFAULT_MODEL_BALE;
 }
@@ -217,19 +217,19 @@ function setUserModelBale(chatId, modelName) {
   PROPS_BALE.setProperty("model_bale_" + chatId, modelName);
 }
 
-// ==================== SEND LONG MESSAGES (SPLIT IF > 4000 CHARACTERS) ====================
+// ==================== ارسال پیام‌های طولانی (تقسیم در صورت بیشتر بودن از 4000 کاراکتر) ====================
 function sendLongBaleMessage(chatId, text, replyToId = null) {
   const MAX_LENGTH = 4000;
   if (!text) return;
 
   for (let i = 0; i < text.length; i += MAX_LENGTH) {
     const chunk = text.substring(i, i + MAX_LENGTH);
-    // Only reply to the original message for the first chunk
+    // فقط برای بخش اول به پیام اصلی ریپلای زده شود
     sendBaleMessage(chatId, chunk, null, i === 0 ? replyToId : null);
   }
 }
 
-// ==================== BALE API CORE FUNCTIONS ====================
+// ==================== توابع اصلی API بله ====================
 function sendBaleMessage(chatId, text, replyMarkup = null, replyToId = null) {
   const url = `https://tapi.bale.ai/bot${BALE_TOKEN}/sendMessage`;
 
@@ -254,7 +254,7 @@ function sendBaleMessage(chatId, text, replyMarkup = null, replyToId = null) {
     muteHttpExceptions: true
   });
 
-  // If Markdown parsing fails, resend without formatting
+  // اگر پارس کردن مارک‌داون شکست خورد، بدون فرمت دوباره ارسال کن
   if (response.getResponseCode() !== 200) {
     delete payload.parse_mode;
     UrlFetchApp.fetch(url, {
@@ -276,7 +276,7 @@ function sendChatActionBale(chatId, action) {
   });
 }
 
-// ==================== BUILD LIVE MODEL SELECTION MENU ====================
+// ==================== ساخت منوی زنده انتخاب مدل ====================
 function sendModelSelectionMenuBale(chatId) {
   const currentModel = getUserModelBale(chatId);
   const models = getAvailableModelsBale();
@@ -306,12 +306,12 @@ function sendModelSelectionMenuBale(chatId) {
   const keyboard = { inline_keyboard: inlineKeyboard };
   sendBaleMessage(
     chatId,
-    "⚡️ Live list of active models for your key (tap a model to switch):",
+    "⚡️ لیست زنده مدل‌های فعال برای کلید شما (برای تغییر مدل روی آن کلیک کنید):",
     keyboard
   );
 }
 
-// ==================== HANDLE MODEL SELECTION BUTTON CLICKS ====================
+// ==================== پردازش کلیک روی دکمه‌های انتخاب مدل ====================
 function handleCallbackQueryBale(callbackQuery) {
   const chatId = callbackQuery.message.chat.id;
   const data = callbackQuery.data;
@@ -325,34 +325,34 @@ function handleCallbackQueryBale(callbackQuery) {
       contentType: "application/json",
       payload: JSON.stringify({
         callback_query_id: callbackQuery.id,
-        text: "Model set successfully!"
+        text: "مدل با موفقیت تنظیم شد!"
       }),
       muteHttpExceptions: true
     });
 
-    sendBaleMessage(chatId, `✅ Your active model has been successfully changed to:\n\`${selectedModel}\``);
+    sendBaleMessage(chatId, `✅ مدل فعال شما با موفقیت تغییر کرد به:\n\`${selectedModel}\``);
   }
 }
 
-// ==================== SET WEBHOOK (RUN ONCE ONLY) ====================
+// ==================== تنظیم وب‌هوک (فقط یک‌بار اجرا شود) ====================
 function setWebhookBale() {
-  const WEBHOOK_URL = "YOUR_WEB_APP_URL_HERE (must end with /exec)";
+  const WEBHOOK_URL = "YOUR_WEB_APP_URL_HERE (حتماً باید با /exec تمام شود)";
 
   const url = `https://tapi.bale.ai/bot${BALE_TOKEN}/setWebhook?url=${encodeURIComponent(WEBHOOK_URL)}`;
   const response = UrlFetchApp.fetch(url);
   Logger.log(response.getContentText());
 }
 
-// ==================== HELPER UTILITIES (RUN FROM EDITOR) ====================
+// ==================== ابزارهای کمکی (از داخل ادیتور اجرا شوند) ====================
 
-// View list of models in logs
+// مشاهده لیست مدل‌ها در لاگ‌ها
 function logModelsBale() {
   const models = getAvailableModelsBale();
   Logger.log("Number of models: " + models.length);
   models.forEach((name, i) => Logger.log((i + 1) + ". " + name));
 }
 
-// View raw API response if model list is empty
+// مشاهده پاسخ خام API در صورت خالی بودن لیست مدل‌ها
 function logModelsRawBale() {
   const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY_BALE}&pageSize=100`;
   const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
@@ -360,13 +360,13 @@ function logModelsRawBale() {
   Logger.log(response.getContentText().substring(0, 1500));
 }
 
-// View history being sent to the model
+// مشاهده تاریخچه‌ای که به مدل ارسال می‌شود
 function debugHistoryBale() {
   const chatId = "YOUR_BALE_CHAT_ID";
   Logger.log(JSON.stringify(getHistoryBale(chatId), null, 2));
 }
 
-// View memory usage
+// بررسی میزان مصرف حافظه
 function checkMemoryUsageBale() {
   const chatId = "YOUR_BALE_CHAT_ID";
   const sh = getSheetBale();
@@ -382,7 +382,7 @@ function checkMemoryUsageBale() {
   Logger.log("Approximate tokens: " + Math.round(json.length / 3));
 }
 
-// Clean up old rows (run manually or set a weekly trigger)
+// پاک‌سازی ردیف‌های قدیمی (دستی اجرا کنید یا تریگر هفتگی بسازید)
 function cleanupOldRowsBale() {
   const sh = getSheetBale();
   const last = sh.getLastRow();

@@ -1,49 +1,51 @@
-﻿// ==================== تنظیمات اولیه ====================
-// کلیدها از Script Properties خوانده می‌شوند
+﻿// ==================== Initial Settings ====================
+// Keys are read from Script Properties
 const PROPS = PropertiesService.getScriptProperties();
 const TELEGRAM_TOKEN = PROPS.getProperty("TELEGRAM_TOKEN");
 const GEMINI_API_KEY = PROPS.getProperty("GEMINI_API_KEY");
 const SHEET_ID = PROPS.getProperty("SHEET_ID");
 
-// بهترین مدل پیش‌فرض برای سرعت بالا و درک چندوجهی (عکس/فایل)
-const DEFAULT_MODEL = "gemini-1.5-flash"; 
-const MAX_HISTORY = 20;       // حداکثر پیام‌های ارسالی به مدل (۱۰ رفت‌وبرگشت)
-const READ_LAST_ROWS = 300;   // خواندن فقط ۳۰۰ ردیف آخر برای حفظ سرعت
+// Best default model for high speed and multimodal understanding (image/file)
+const DEFAULT_MODEL = "gemini-3.5-flash-lite"; 
+const MAX_HISTORY = 20;       // Maximum messages sent to the model (10 round-trips)
+const READ_LAST_ROWS = 300;   // Read only the last 300 rows to maintain speed
 const KEEP_ROWS = 2000;       
 const SHEET_NAME = "history";
 
-// ==================== ذخیره کلیدها (فقط یک‌بار برای تنظیمات اجرا شود) ====================
+// ==================== Save Keys (Run only once for setup) ====================
 function setSecrets() {
   PROPS.setProperties({
-    TELEGRAM_TOKEN: "توکن_تلگرام_شما",
-    GEMINI_API_KEY: "کلید_جمنای_شما",
-    SHEET_ID: "آیدی_شیت_شما"
+    TELEGRAM_TOKEN: "YOUR_TELEGRAM_TOKEN",
+    GEMINI_API_KEY: "YOUR_GEMINI_API_KEY",
+    SHEET_ID: "YOUR_SHEET_ID"
   });
-  Logger.log("تنظیمات ذخیره شد. حالا می‌توانید مقادیر را از کد پاک کنید.");
+  Logger.log("Settings saved. You can now remove the values from the code.");
 }
 
-// ==================== لیست مدل‌های کاربران (سریع و ثابت) ====================
-// این لیست را می‌توانید بر اساس خروجی تابع logAvailableModelsFromAPI (در پایین کد) تغییر دهید
+// ==================== User Models List (Fast and Static) ====================
+// You can change this list based on the output of logAvailableModelsFromAPI function (at the bottom of the code)
+// Best default models for your key
+
 function getAvailableModels() {
   return [
-    "gemini-1.5-flash",       
-    "gemini-1.5-pro",         
-    "gemini-2.0-flash-exp",
-    "gemini-1.5-flash-8b"
+    "gemini-3.5-flash",       // Main and fast model
+    "gemini-3.5-flash-lite",  // Ultra-lightweight version
+    "gemini-omni-1.1-flash",  // Advanced multimodal model
+    "gemini-4-argon"          // New generation model
   ];
 }
 
-// ==================== دریافت درخواست‌های وب‌هوک ====================
+// ==================== Receive Webhook Requests ====================
 function doPost(e) {
   try {
     const update = JSON.parse(e.postData.contents);
 
-    // جلوگیری از پردازش آپدیت تکراری
+    // Prevent processing duplicate updates
     if (isDuplicateUpdate(update.update_id)) {
       return HtmlService.createHtmlOutput("OK");
     }
 
-    // کلیک روی دکمه شیشه‌ای (انتخاب مدل)
+    // Click on inline button (Model selection)
     if (update.callback_query) {
       handleCallbackQuery(update.callback_query);
       return HtmlService.createHtmlOutput("OK");
@@ -57,12 +59,12 @@ function doPost(e) {
     const messageId = update.message.message_id;
     let text = update.message.text || update.message.caption || "";
     
-    // تشخیص ارسال فایل، عکس یا ویس
+    // Detect file, photo, or voice message
     let fileId = null;
     let mimeType = null;
 
     if (update.message.photo) {
-      const photo = update.message.photo[update.message.photo.length - 1]; // بالاترین کیفیت
+      const photo = update.message.photo[update.message.photo.length - 1]; // Highest quality
       fileId = photo.file_id;
       mimeType = "image/jpeg";
     } else if (update.message.voice) {
@@ -73,7 +75,7 @@ function doPost(e) {
       mimeType = update.message.document.mime_type || "application/pdf";
     }
 
-    // پردازش دستورات اصلی ربات
+    // Process main bot commands
     if (text === "/start" || text === "/help") {
       const welcomeMsg =
         "سلام! من دستیار هوشمند شما هستم 🤖\n\n" +
@@ -105,12 +107,12 @@ function doPost(e) {
       return HtmlService.createHtmlOutput("OK");
     }
 
-    // پردازش فایل در صورت وجود
+    // Process file if it exists
     let fileBase64 = null;
     if (fileId) {
       sendChatAction(chatId, "upload_document");
       fileBase64 = getTelegramFileBase64(fileId);
-      if (!text) text = "لطفاً این فایل را به دقت بررسی و تحلیل کن."; // متن پیش‌فرض
+      if (!text) text = "لطفاً این فایل را به دقت بررسی و تحلیل کن."; // Default text
     } else {
       sendChatAction(chatId, "typing");
     }
@@ -119,7 +121,7 @@ function doPost(e) {
 
     const currentModel = getUserModel(chatId);
     
-    // ارسال پیام زنده "در حال پردازش..."
+    // Send live "Processing..." message
     const processingMsg = UrlFetchApp.fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
       method: "post", contentType: "application/json",
       payload: JSON.stringify({ chat_id: chatId, text: "⏳ _در حال تحلیل و تفکر..._", parse_mode: "Markdown" }),
@@ -130,10 +132,10 @@ function doPost(e) {
       processingMsgId = JSON.parse(processingMsg.getContentText()).result.message_id;
     }
 
-    // درخواست به هوش مصنوعی جمنای
+    // Request to Gemini AI
     const reply = askGemini(chatId, text, currentModel, fileBase64, mimeType);
     
-    // حذف پیام "در حال پردازش..."
+    // Delete "Processing..." message
     if (processingMsgId) {
       UrlFetchApp.fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteMessage`, {
         method: "post", contentType: "application/json",
@@ -142,7 +144,7 @@ function doPost(e) {
       });
     }
 
-    // ارسال پاسخ نهایی
+    // Send final response
     sendLongTelegramMessage(chatId, reply, messageId);
 
   } catch (err) {
@@ -152,17 +154,17 @@ function doPost(e) {
   return HtmlService.createHtmlOutput("OK");
 }
 
-// ==================== توابع جلوگیری از اجرای تکراری ====================
+// ==================== Duplicate Execution Prevention Functions ====================
 function isDuplicateUpdate(updateId) {
   if (updateId === undefined) return false;
   const cache = CacheService.getScriptCache();
   const key = "upd_" + updateId;
   if (cache.get(key)) return true;
-  cache.put(key, "1", 600); // 10 دقیقه
+  cache.put(key, "1", 600); // 10 minutes
   return false;
 }
 
-// ==================== مدیریت حافظه و Google Sheet ====================
+// ==================== Memory and Google Sheet Management ====================
 function getSheet() {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   let sh = ss.getSheetByName(SHEET_NAME);
@@ -208,7 +210,7 @@ function clearHistory(chatId) {
   appendHistory(chatId, "reset", "");
 }
 
-// ==================== تنظیمات شخصی کاربر ====================
+// ==================== User Personal Settings ====================
 function getUserModel(chatId) {
   return PROPS.getProperty("model_" + chatId) || DEFAULT_MODEL;
 }
@@ -229,7 +231,7 @@ function setUserPersona(chatId, personaText) {
   }
 }
 
-// ==================== دانلود فایل از سرور تلگرام ====================
+// ==================== Download File from Telegram Server ====================
 function getTelegramFileBase64(fileId) {
   try {
     const getFileUrl = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/getFile?file_id=${fileId}`;
@@ -248,13 +250,13 @@ function getTelegramFileBase64(fileId) {
   }
 }
 
-// ==================== موتور ارتباط با جمنای ====================
+// ==================== Gemini Communication Engine ====================
 function askGemini(chatId, promptText, modelName, fileBase64 = null, mimeType = null) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`;
 
   const contents = getHistory(chatId);
   
-  // ساختاردهی پیام کاربر به همراه پیوست‌ها
+  // Structuring user message along with attachments
   const userParts = [];
   if (promptText) {
     userParts.push({ text: promptText });
@@ -271,7 +273,7 @@ function askGemini(chatId, promptText, modelName, fileBase64 = null, mimeType = 
     generationConfig: { temperature: 0.7, maxOutputTokens: 2500 }
   };
 
-  // تزریق زمان زنده ایران و دستورات شخصیتی (Persona)
+  // Injecting live time and persona instructions
   const now = Utilities.formatDate(new Date(), "Asia/Tehran", "yyyy/MM/dd HH:mm:ss");
   let systemContext = "تو یک دستیار هوشمند هستی. تاریخ و ساعت دقیق فعلی سیستم به وقت ایران: " + now;
   
@@ -298,7 +300,7 @@ function askGemini(chatId, promptText, modelName, fileBase64 = null, mimeType = 
     if (json.candidates && json.candidates[0].content) {
       const reply = json.candidates[0].content.parts.map(p => p.text || "").join("");
 
-      // جلوگیری از ذخیره بیس۶۴ در شیت
+      // Prevent saving base64 in the sheet
       const historyPromptText = fileBase64 ? (promptText + "\n[فایل/عکس پیوست شد]") : promptText;
       try {
         appendHistory(chatId, "user", historyPromptText);
@@ -316,36 +318,36 @@ function askGemini(chatId, promptText, modelName, fileBase64 = null, mimeType = 
   }
 }
 
-// ==================== رندرینگ زیبای متون و کدها در تلگرام ====================
+// ==================== Beautiful Rendering of Texts and Codes in Telegram ====================
 function convertToTelegramMarkdownV2(text) {
   if (!text) return "";
   
-  // 1. محافظت از بلاک‌های کد
+  // 1. Protect code blocks (using @ instead of _ to prevent conflicts)
   let codeBlocks = [];
   text = text.replace(/```([\s\S]*?)```/g, (match) => {
     codeBlocks.push(match);
-    return `__CB${codeBlocks.length - 1}__`;
+    return `@@CB${codeBlocks.length - 1}@@`;
   });
   let inlineCodes = [];
   text = text.replace(/`([^`]+)`/g, (match) => {
     inlineCodes.push(match);
-    return `__IC${inlineCodes.length - 1}__`;
+    return `@@IC${inlineCodes.length - 1}@@`;
   });
 
-  // 2. Escape کردن کاراکترهای حساس
+  // 2. Escape Telegram sensitive characters
   const specialChars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'];
   specialChars.forEach(char => {
     const regex = new RegExp('\\' + char, 'g');
     text = text.replace(regex, '\\' + char);
   });
 
-  // 3. تبدیل سینتکس مارک‌داون جمنای به تلگرام
+  // 3. Convert Gemini markdown syntax to Telegram
   text = text.replace(/\\\*\\\*(.*?)\\\*\\\*/g, '*$1*'); // Bold
   text = text.replace(/\\\*(.*?)\\\*/g, '_$1_');         // Italic
 
-  // 4. بازگرداندن کدها
-  text = text.replace(/__CB(\d+)__/g, (match, p1) => codeBlocks[p1]);
-  text = text.replace(/__IC(\d+)__/g, (match, p1) => inlineCodes[p1]);
+  // 4. Restore codes safely
+  text = text.replace(/@@CB(\d+)@@/g, (match, p1) => codeBlocks[p1]);
+  text = text.replace(/@@IC(\d+)@@/g, (match, p1) => inlineCodes[p1]);
 
   return text;
 }
@@ -397,7 +399,7 @@ function sendChatAction(chatId, action) {
   });
 }
 
-// ==================== مدیریت منوی انتخاب مدل ====================
+// ==================== Model Selection Menu Management ====================
 function sendModelSelectionMenu(chatId) {
   const currentModel = getUserModel(chatId);
   const models = getAvailableModels();
@@ -440,7 +442,7 @@ function handleCallbackQuery(callbackQuery) {
   }
 }
 
-// ==================== ابزار مخصوص ادمین (در محیط گوگل اسکریپت اجرا کنید) ====================
+// ==================== Admin Tool (Run in Google Apps Script environment) ====================
 function logAvailableModelsFromAPI() {
   Logger.log("در حال ارتباط با API برای دریافت مدل‌های در دسترس...");
   try {
